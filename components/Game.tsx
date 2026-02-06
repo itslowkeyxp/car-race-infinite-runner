@@ -11,6 +11,7 @@ interface GameProps {
   fuel: number;
   stage: number;
   onCrash: () => void;
+  onConeHit: () => void;
   onScore: (delta: number, speed: number) => void;
   onNitro: (val: number) => void;
   onCollect: (type: PowerupType) => void;
@@ -42,7 +43,7 @@ const Lighting = ({ color }: { color: string }) => (
   </>
 );
 
-export default function Game({ gameStatus, isInvincible, fuel, stage, onCrash, onScore, onNitro, onCollect }: GameProps) {
+export default function Game({ gameStatus, isInvincible, fuel, stage, onCrash, onConeHit, onScore, onNitro, onCollect }: GameProps) {
   
   // Select theme based on stage (cycle through 4 themes)
   const themeIndex = (stage - 1) % THEMES.length;
@@ -75,7 +76,8 @@ export default function Game({ gameStatus, isInvincible, fuel, stage, onCrash, o
           fuel={fuel}
           stage={stage}
           groundColor={currentTheme.ground}
-          onCrash={onCrash} 
+          onCrash={onCrash}
+          onConeHit={onConeHit} 
           onScore={onScore}
           onCollect={onCollect}
         >

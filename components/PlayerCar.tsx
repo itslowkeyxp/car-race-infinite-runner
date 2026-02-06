@@ -57,6 +57,24 @@ const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, isInvincible, onNitro
     };
   }, [gameStatus]);
 
+  // Game Reset Logic
+  useEffect(() => {
+    if (gameStatus === GameStatus.PLAYING) {
+        setLane(0);
+        xPos.current = 0;
+        targetX.current = 0;
+        tilt.current = 0;
+        setNitroFuel(100);
+        setIsNitroActive(false);
+        playerPositionRef.x = 0;
+        playerPositionRef.speedMultiplier = 1;
+        if (group.current) {
+            group.current.position.set(0, 0, 0);
+            group.current.rotation.set(0, 0, 0);
+        }
+    }
+  }, [gameStatus]);
+
   // Game Loop
   useFrame((state, delta) => {
     if (!group.current) return;
@@ -78,6 +96,8 @@ const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, isInvincible, onNitro
     
     // Update global reference for other components
     playerPositionRef.speedMultiplier = active ? speedMult : 0;
+    
+    // Sync UI (Throttle this if needed, but for now simple)
     onNitro(currentNitro);
 
     // Lateral Movement (Lerp)

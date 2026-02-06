@@ -12,6 +12,7 @@ interface WorldProps {
   groundColor: string;
   children?: React.ReactNode;
   onCrash: () => void;
+  onConeHit: () => void;
   onScore: (d: number, s: number) => void;
   onCollect: (type: PowerupType) => void;
 }
@@ -21,6 +22,7 @@ const ROAD_SEGMENTS = 20;
 const SEGMENT_LENGTH = 10;
 const VIEW_DISTANCE = 200; // How far back to spawn
 const LANES = [-1, 0, 1];
+const SHOULDER_LANES = [-2, 2]; // Lanes for cones on shoulders
 
 // Car Dimensions (Visual)
 const CAR_WIDTH = 1.6;
@@ -34,19 +36,28 @@ const HITBOX_DZ = CAR_LENGTH * 0.95;
 const POWERUP_DX = 1.5;
 const POWERUP_DZ = 1.5;
 
+// Car Models
+type CarModel = 'sedan' | 'truck' | 'sport';
+
 // --- Types ---
 interface MovingObject {
   id: number;
   z: number;
   lane: number;
-  speedOffset: number; // For enemies, relative speed
-  type: 'tree' | 'car' | 'sign' | 'powerup';
+  speedOffset: number; // For enemies, relative speed. 0 = static on road.
+  type: 'tree' | 'car' | 'barrier' | 'powerup' | 'cone';
+  model?: CarModel; // Model type for cars
   powerupType?: PowerupType;
   color?: string;
   active: boolean;
+  // Hit logic for cones
+  hit?: boolean;
+  velocity?: { x: number, y: number, z: number };
+  y?: number; // Y position for flying objects
+  x?: number; // X position override
 }
 
-export default function World({ gameStatus, fuel, stage, groundColor, children, onCrash, onScore, onCollect }: WorldProps) {
+export default function World({ gameStatus, fuel, stage, groundColor, children, onCrash, onConeHit, onScore, onCollect }: WorldProps) {
   // --- Refs & State ---
   const roadRef = useRef<Group>(null);
   const objectsRef = useRef<MovingObject[]>([]);
@@ -79,8 +90,8 @@ export default function World({ gameStatus, fuel, stage, groundColor, children, 
     if (gameStatus !== GameStatus.PLAYING) return;
 
     // 1. Calculate World Speed
-    // Speed slightly increases with stage (5% per stage cap at 50%)
-    const stageSpeedMultiplier = 1 + Math.min(0.5, (stageRef.current - 1) * 0.05);
+    // Speed increases indefinitely with stage, capped at 3x base speed.
+    const stageSpeedMultiplier = 1 + Math.min(2.0, (stageRef.current - 1) * 0.08);
     const currentSpeed = BASE_SPEED * playerPositionRef.speedMultiplier * stageSpeedMultiplier;
     const distanceTraveled = currentSpeed * delta;
 
@@ -88,23 +99,56 @@ export default function World({ gameStatus, fuel, stage, groundColor, children, 
     objectsRef.current.forEach(obj => {
         if (!obj.active) return;
         
-        let moveSpeed = currentSpeed;
-        if (obj.type === 'car') {
-            moveSpeed = currentSpeed - obj.speedOffset;
+        // Physics for hit objects (flying cones)
+        if (obj.hit && obj.velocity) {
+             obj.y = (obj.y || 0) + obj.velocity.y * delta;
+             obj.velocity.y -= 25 * delta; // Gravity
+             
+             // Drift X
+             obj.x = (obj.x ?? (obj.lane * LANE_WIDTH)) + obj.velocity.x * delta;
+             
+             // Move Z. Relative to camera (0), it should move away rapidly or with road?
+             // It moves with road speed + velocity.z
+             obj.z += (currentSpeed + obj.velocity.z) * delta;
+
+             // Remove if falls below road
+             if ((obj.y || 0) < -5) obj.active = false;
+        } else {
+            // Normal movement
+            let moveSpeed = currentSpeed;
+            if (obj.type === 'car') {
+                moveSpeed = currentSpeed - obj.speedOffset;
+            }
+            obj.z += moveSpeed * delta;
         }
 
-        obj.z += moveSpeed * delta;
-
-        // Collision Detection
-        if (obj.active) {
-            const dx = Math.abs(playerPositionRef.x - (obj.lane * LANE_WIDTH));
+        // Collision Detection (Only if not already hit)
+        if (obj.active && !obj.hit) {
+            // Current X position
+            const objX = obj.x ?? (obj.lane * LANE_WIDTH);
+            const dx = Math.abs(playerPositionRef.x - objX);
             const dz = Math.abs(0 - obj.z); // Player is at z=0
 
-            if (obj.type === 'car') {
+            if (obj.type === 'car' || obj.type === 'barrier') {
                  if (dx < HITBOX_DX && dz < HITBOX_DZ) {
                     onCrash();
                     obj.active = false;
                 }
+            } else if (obj.type === 'cone') {
+                 // Use HITBOX_DZ to prevent tunneling at high speeds
+                 if (dx < 1.0 && dz < HITBOX_DZ) {
+                     onConeHit();
+                     obj.hit = true;
+                     // Give it some velocity for animation
+                     obj.velocity = { 
+                         x: (Math.random() - 0.5) * 10, 
+                         y: 8 + Math.random() * 4, 
+                         z: 10 + Math.random() * 5 
+                     };
+                     // Initialize X/Y
+                     obj.x = obj.lane * LANE_WIDTH;
+                     obj.y = 0;
+                 }
             } else if (obj.type === 'powerup' && obj.powerupType) {
                  if (dx < POWERUP_DX && dz < POWERUP_DZ) {
                      onCollect(obj.powerupType);
@@ -114,7 +158,7 @@ export default function World({ gameStatus, fuel, stage, groundColor, children, 
         }
 
         // Despawn if behind camera
-        if (obj.z > 20) {
+        if (obj.z > 20 && !obj.hit) {
             obj.active = false;
         }
     });
@@ -124,8 +168,8 @@ export default function World({ gameStatus, fuel, stage, groundColor, children, 
 
     // 3. Spawning Logic
     // Dynamic spawn rate based on speed and STAGE
-    // Base probability 0.05. Increases with speed and stage.
-    const spawnProb = 0.05 * (currentSpeed / BASE_SPEED) * (1 + (stageRef.current - 1) * 0.1);
+    // Higher stage = higher spawn prob
+    const spawnProb = 0.05 * (currentSpeed / BASE_SPEED) * (1 + (stageRef.current - 1) * 0.15);
     
     if (Math.random() < spawnProb) { 
         spawnObject();
@@ -151,39 +195,37 @@ export default function World({ gameStatus, fuel, stage, groundColor, children, 
   });
 
   const spawnObject = () => {
-      // Limit density based on stage (allow more objects at higher stages)
-      const maxObjects = 5 + Math.floor(stageRef.current / 2);
-      const moving = objectsRef.current.filter(o => (o.type === 'car' || o.type === 'powerup') && o.z < -20);
+      // Density increases with stage
+      const maxObjects = 6 + stageRef.current;
+      const moving = objectsRef.current.filter(o => (o.type === 'car' || o.type === 'powerup' || o.type === 'barrier' || o.type === 'cone') && o.z < -20);
       if (moving.length > maxObjects) return;
 
       const lane = LANES[Math.floor(Math.random() * LANES.length)];
-      // Check if lane is occupied recently
-      // Minimum gap decreases as stage increases (harder!)
-      const minGap = Math.max(15, 30 - stageRef.current * 2);
+      // Min gap decreases with stage to make it tighter
+      const minGap = Math.max(12, 30 - stageRef.current * 1.5);
       const tooClose = moving.some(c => c.lane === lane && Math.abs(c.z - (-VIEW_DISTANCE)) < minGap);
       if (tooClose) return;
 
-      // Decide Type: Car or Powerup?
-      let powerupChance = 0.2;
+      // Decide Type
       const currentFuel = fuelRef.current;
+      // Triggers earlier (at 50% fuel) and spawns more frequently (30% base chance)
+      let powerupChance = currentFuel < 50 ? 0.5 : 0.3; 
       
-      if (currentFuel < 30) {
-          powerupChance = 0.45;
-      }
-
       if (Math.random() < powerupChance) {
-          // Determine Powerup Type
+          // --- Spawn Powerup ---
           const rand = Math.random();
           let pType = PowerupType.SCORE;
           
-          if (currentFuel < 30) {
-               if (rand < 0.6) pType = PowerupType.FUEL;
-               else if (rand < 0.8) pType = PowerupType.SHIELD;
+          if (currentFuel < 50) {
+               // High chance of fuel when low
+               if (rand < 0.8) pType = PowerupType.FUEL;
+               else if (rand < 0.9) pType = PowerupType.SHIELD;
                else pType = PowerupType.NITRO;
           } else {
-               if (rand < 0.25) pType = PowerupType.FUEL;
-               else if (rand < 0.5) pType = PowerupType.NITRO;
-               else if (rand < 0.75) pType = PowerupType.SHIELD;
+               // Normal distribution, but with more fuel (45%)
+               if (rand < 0.45) pType = PowerupType.FUEL;
+               else if (rand < 0.65) pType = PowerupType.NITRO;
+               else if (rand < 0.85) pType = PowerupType.SHIELD;
           }
 
           objectsRef.current.push({
@@ -197,23 +239,62 @@ export default function World({ gameStatus, fuel, stage, groundColor, children, 
           });
 
       } else {
-          // Spawn Enemy Car
-          // Enemy relative speed variance increases with stage
-          const baseEnemySpeed = BASE_SPEED * 0.5;
-          const variance = 20 + (stageRef.current * 5);
-          const enemySpeed = baseEnemySpeed + Math.random() * variance; 
+          // --- Spawn Obstacle (Car, Barrier, or Cone) ---
           
-          const colors = ['#ef4444', '#f97316', '#84cc16', '#a855f7', '#ec4899'];
+          const roll = Math.random();
 
-          objectsRef.current.push({
-              id: Math.random(),
-              z: -VIEW_DISTANCE - Math.random() * 50,
-              lane: lane,
-              speedOffset: enemySpeed,
-              type: 'car',
-              color: colors[Math.floor(Math.random() * colors.length)],
-              active: true
-          });
+          // 25% Chance for Traffic Cone
+          if (roll < 0.25) {
+              const useShoulder = Math.random() < 0.4; // 40% Shoulder, 60% Lane (Interactive!)
+              const coneLane = useShoulder 
+                ? SHOULDER_LANES[Math.floor(Math.random() * SHOULDER_LANES.length)] 
+                : lane;
+
+              objectsRef.current.push({
+                  id: Math.random(),
+                  z: -VIEW_DISTANCE,
+                  lane: coneLane,
+                  speedOffset: 0, // Static
+                  type: 'cone',
+                  active: true
+              });
+          } else {
+              // 75% Chance for Dangerous Obstacle
+              
+              // Barriers appear from stage 4 onwards
+              const barrierChance = stageRef.current >= 4 ? 0.25 : 0;
+              
+              if (Math.random() < barrierChance) {
+                  // Spawn Static Barrier
+                  objectsRef.current.push({
+                      id: Math.random(),
+                      z: -VIEW_DISTANCE,
+                      lane: lane,
+                      speedOffset: 0, 
+                      type: 'barrier',
+                      active: true
+                  });
+              } else {
+                  // Spawn Enemy Car
+                  const baseEnemySpeed = BASE_SPEED * 0.5;
+                  const variance = 15 + (stageRef.current * 8); // More chaotic speeds
+                  const enemySpeed = baseEnemySpeed + Math.random() * variance; 
+                  
+                  const colors = ['#ef4444', '#f97316', '#84cc16', '#a855f7', '#ec4899', '#3b82f6', '#eab308'];
+                  const models: CarModel[] = ['sedan', 'truck', 'sport'];
+
+                  objectsRef.current.push({
+                      id: Math.random(),
+                      z: -VIEW_DISTANCE - Math.random() * 50,
+                      lane: lane,
+                      speedOffset: enemySpeed,
+                      type: 'car',
+                      model: models[Math.floor(Math.random() * models.length)] as CarModel,
+                      color: colors[Math.floor(Math.random() * colors.length)],
+                      active: true
+                  });
+              }
+          }
       }
   };
 
@@ -286,8 +367,10 @@ const RenderObjects = ({ objectsRef }: { objectsRef: React.MutableRefObject<Movi
     return (
         <group ref={groupRef}>
             {objectsRef.current.map((obj) => (
-                <group key={obj.id} position={[obj.lane * (obj.type === 'tree' ? 1 : LANE_WIDTH), 0, obj.z]}>
-                    {obj.type === 'car' && <EnemyCar color={obj.color || 'red'} />}
+                <group key={obj.id} position={[obj.x ?? obj.lane * (obj.type === 'tree' ? 1 : LANE_WIDTH), obj.y ?? 0, obj.z]}>
+                    {obj.type === 'car' && <EnemyCar color={obj.color || 'red'} model={obj.model || 'sedan'} />}
+                    {obj.type === 'barrier' && <Barrier />}
+                    {obj.type === 'cone' && <Cone hit={obj.hit} />}
                     {obj.type === 'tree' && <Tree />}
                     {obj.type === 'powerup' && <PowerupMesh type={obj.powerupType!} />}
                 </group>
@@ -298,26 +381,153 @@ const RenderObjects = ({ objectsRef }: { objectsRef: React.MutableRefObject<Movi
 
 // --- Meshes ---
 
-const EnemyCar = ({ color }: { color: string }) => (
+const Cone = ({ hit }: { hit?: boolean }) => {
+    // If hit, we could rotate it wildly in local space, but parent handles trajectory
+    const ref = useRef<Group>(null);
+    useFrame((state, delta) => {
+        if (hit && ref.current) {
+            ref.current.rotation.x += delta * 10;
+            ref.current.rotation.z += delta * 5;
+        }
+    });
+
+    return (
+        <group ref={ref}>
+            <mesh position={[0, 0.3, 0]} castShadow>
+                <cylinderGeometry args={[0.05, 0.25, 0.6, 16]} />
+                <meshStandardMaterial color="#f97316" />
+            </mesh>
+            <mesh position={[0, 0.05, 0]}>
+                 <boxGeometry args={[0.5, 0.1, 0.5]} />
+                 <meshStandardMaterial color="#f97316" />
+            </mesh>
+            <mesh position={[0, 0.2, 0]}>
+                 <cylinderGeometry args={[0.1, 0.15, 0.15, 16]} />
+                 <meshStandardMaterial color="white" />
+            </mesh>
+             <mesh position={[0, 0.45, 0]}>
+                 <cylinderGeometry args={[0.06, 0.08, 0.1, 16]} />
+                 <meshStandardMaterial color="white" />
+            </mesh>
+        </group>
+    );
+}
+
+const Barrier = () => (
     <group>
         <mesh position={[0, 0.5, 0]} castShadow>
-            <boxGeometry args={[1.6, 0.8, 3.8]} />
-            <meshStandardMaterial color={color} />
+            <boxGeometry args={[2.0, 1.0, 1.0]} />
+            <meshStandardMaterial color="#fbbf24" roughness={0.5} />
         </mesh>
-        <mesh position={[0, 1.1, 0.2]} castShadow>
-            <boxGeometry args={[1.4, 0.6, 1.8]} />
-            <meshStandardMaterial color="#333" />
+        {/* Stripes */}
+        <mesh position={[-0.6, 0.51, 0]}>
+            <boxGeometry args={[0.2, 1.01, 1.05]} />
+            <meshStandardMaterial color="#000" />
         </mesh>
-         <mesh position={[-0.6, 0.6, 1.91]}>
-          <planeGeometry args={[0.3, 0.15]} />
-          <meshStandardMaterial color="#550000" />
+        <mesh position={[0.6, 0.51, 0]}>
+            <boxGeometry args={[0.2, 1.01, 1.05]} />
+            <meshStandardMaterial color="#000" />
         </mesh>
-        <mesh position={[0.6, 0.6, 1.91]}>
-          <planeGeometry args={[0.3, 0.15]} />
-          <meshStandardMaterial color="#550000" />
+        <mesh position={[0, 0.51, 0]}>
+            <boxGeometry args={[0.2, 1.01, 1.05]} />
+            <meshStandardMaterial color="#000" />
         </mesh>
     </group>
 );
+
+const EnemyCar = ({ color, model }: { color: string, model: CarModel }) => {
+    if (model === 'truck') {
+        return (
+            <group>
+                {/* Truck Body */}
+                <mesh position={[0, 0.6, 0]} castShadow>
+                    <boxGeometry args={[1.8, 1.0, 4.2]} />
+                    <meshStandardMaterial color={color} />
+                </mesh>
+                {/* Truck Cabin */}
+                <mesh position={[0, 1.4, -0.8]} castShadow>
+                    <boxGeometry args={[1.6, 0.8, 1.8]} />
+                    <meshStandardMaterial color="#333" />
+                </mesh>
+                {/* Truck Bed Area */}
+                <mesh position={[0, 1.15, 1.2]} castShadow>
+                     <boxGeometry args={[1.4, 0.1, 1.8]} />
+                     <meshStandardMaterial color="#111" />
+                </mesh>
+                {/* Taillights */}
+                <mesh position={[-0.7, 0.8, 2.11]}>
+                    <planeGeometry args={[0.3, 0.2]} />
+                    <meshStandardMaterial color="#550000" />
+                </mesh>
+                <mesh position={[0.7, 0.8, 2.11]}>
+                    <planeGeometry args={[0.3, 0.2]} />
+                    <meshStandardMaterial color="#550000" />
+                </mesh>
+            </group>
+        );
+    }
+    
+    if (model === 'sport') {
+        return (
+            <group>
+                {/* Low Body */}
+                <mesh position={[0, 0.4, 0]} castShadow>
+                    <boxGeometry args={[1.7, 0.6, 3.8]} />
+                    <meshStandardMaterial color={color} />
+                </mesh>
+                {/* Streamlined Cabin */}
+                <mesh position={[0, 0.8, 0.1]} castShadow>
+                    <boxGeometry args={[1.4, 0.5, 2.0]} />
+                    <meshStandardMaterial color="#222" />
+                </mesh>
+                 {/* Spoiler */}
+                <mesh position={[0, 0.8, 1.6]} castShadow>
+                    <boxGeometry args={[1.6, 0.1, 0.4]} />
+                    <meshStandardMaterial color={color} />
+                </mesh>
+                 <mesh position={[-0.6, 0.6, 1.6]}>
+                    <boxGeometry args={[0.1, 0.3, 0.2]} />
+                    <meshStandardMaterial color={color} />
+                </mesh>
+                 <mesh position={[0.6, 0.6, 1.6]}>
+                    <boxGeometry args={[0.1, 0.3, 0.2]} />
+                    <meshStandardMaterial color={color} />
+                </mesh>
+                {/* Lights */}
+                <mesh position={[-0.6, 0.5, 1.91]}>
+                    <planeGeometry args={[0.4, 0.1]} />
+                    <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={0.5} />
+                </mesh>
+                <mesh position={[0.6, 0.5, 1.91]}>
+                    <planeGeometry args={[0.4, 0.1]} />
+                    <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={0.5} />
+                </mesh>
+            </group>
+        );
+    }
+
+    // Default Sedan
+    return (
+        <group>
+            <mesh position={[0, 0.5, 0]} castShadow>
+                <boxGeometry args={[1.6, 0.8, 3.8]} />
+                <meshStandardMaterial color={color} />
+            </mesh>
+            <mesh position={[0, 1.1, 0.2]} castShadow>
+                <boxGeometry args={[1.4, 0.6, 1.8]} />
+                <meshStandardMaterial color="#333" />
+            </mesh>
+             <mesh position={[-0.6, 0.6, 1.91]}>
+              <planeGeometry args={[0.3, 0.15]} />
+              <meshStandardMaterial color="#550000" />
+            </mesh>
+            <mesh position={[0.6, 0.6, 1.91]}>
+              <planeGeometry args={[0.3, 0.15]} />
+              <meshStandardMaterial color="#550000" />
+            </mesh>
+        </group>
+    );
+};
 
 const Tree = () => (
     <group>

@@ -60,8 +60,9 @@ export default function App() {
     if (status === GameStatus.PLAYING) {
       interval = window.setInterval(() => {
         setFuel(prev => {
-          // Fuel drain increases slightly with stage
-          const stageFactor = 1 + (stage * 0.1); 
+          // Fuel drain increases with stage - difficulty scaling
+          // Base drain + 15% per stage
+          const stageFactor = 1 + (stage * 0.15); 
           const next = prev - (FUEL_DRAIN_RATE * stageFactor * 0.1); // Run every 100ms
           if (next <= 0) {
              setStatus(GameStatus.GAME_OVER);
@@ -106,9 +107,30 @@ export default function App() {
       // Reset combo on hit
       setCombo(1.0);
       // Also lose a chunk of fuel on crash penalty
-      setFuel(f => Math.max(0, f - 10));
+      setFuel(f => Math.max(0, f - 15)); // Higher penalty for crashing
       return newLives;
     });
+  }, [isInvincible]);
+
+  const handleConeHit = useCallback(() => {
+      if (isInvincible) return; // Shield protects from cones too
+
+      // Small shake for impact feedback
+      setIsShaking(true);
+      setTimeout(() => setIsShaking(false), 200);
+      
+      // Damage Logic: Reduce lives
+      setLives(prev => {
+        const newLives = prev - 1;
+        if (newLives <= 0) {
+            setStatus(GameStatus.GAME_OVER);
+            return 0;
+        }
+        return newLives;
+      });
+      
+      // Penalty: Break combo
+      setCombo(1.0);
   }, [isInvincible]);
 
   const handleScoreUpdate = useCallback((deltaScore: number, currentSpeed: number) => {
@@ -162,6 +184,7 @@ export default function App() {
           fuel={fuel}
           stage={stage}
           onCrash={handleCrash}
+          onConeHit={handleConeHit}
           onScore={handleScoreUpdate}
           onNitro={handleNitroUpdate}
           onCollect={handleCollect}
