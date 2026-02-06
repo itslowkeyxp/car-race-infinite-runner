@@ -1,15 +1,18 @@
 import React, { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Sky, Stars } from '@react-three/drei';
-import { GameStatus } from '../types';
+import { GameStatus, PowerupType } from '../types';
 import World from './WorldObjects';
 import PlayerCar from './PlayerCar';
 
 interface GameProps {
   gameStatus: GameStatus;
+  isInvincible: boolean;
+  fuel: number;
   onCrash: () => void;
   onScore: (delta: number, speed: number) => void;
   onNitro: (val: number) => void;
+  onCollect: (type: PowerupType) => void;
 }
 
 const FogController = () => {
@@ -30,7 +33,7 @@ const Lighting = () => (
   </>
 );
 
-export default function Game({ gameStatus, onCrash, onScore, onNitro }: GameProps) {
+export default function Game({ gameStatus, isInvincible, fuel, onCrash, onScore, onNitro, onCollect }: GameProps) {
   return (
     <Canvas shadows camera={{ position: [0, 4, 10], fov: 60 }}>
       <Suspense fallback={null}>
@@ -51,8 +54,10 @@ export default function Game({ gameStatus, onCrash, onScore, onNitro }: GameProp
         {/* The World Manager handles the road, enemies, and environment scrolling */}
         <World 
           gameStatus={gameStatus} 
+          fuel={fuel}
           onCrash={onCrash} 
           onScore={onScore}
+          onCollect={onCollect}
         >
           {/* We pass the Player as a child or sibling depending on architecture, 
               but here the World needs to know player position for collision, 
@@ -60,7 +65,7 @@ export default function Game({ gameStatus, onCrash, onScore, onNitro }: GameProp
               
               Better: World manages "scrolling" environment. Player is static in Z.
           */}
-           <PlayerCar gameStatus={gameStatus} onNitro={onNitro} />
+           <PlayerCar gameStatus={gameStatus} onNitro={onNitro} isInvincible={isInvincible} />
         </World>
 
         {/* Floor Plane for infinite illusion far background */}

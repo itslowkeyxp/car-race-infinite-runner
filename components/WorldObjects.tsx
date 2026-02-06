@@ -2,14 +2,16 @@ import React, { useRef, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Instance, Instances } from '@react-three/drei';
 import { Color, Group, MathUtils, Vector3 } from 'three';
-import { GameStatus, LANE_WIDTH, BASE_SPEED } from '../types';
+import { GameStatus, LANE_WIDTH, BASE_SPEED, PowerupType } from '../types';
 import { playerPositionRef } from './PlayerCar';
 
 interface WorldProps {
   gameStatus: GameStatus;
+  fuel: number;
   children?: React.ReactNode;
   onCrash: () => void;
   onScore: (d: number, s: number) => void;
+  onCollect: (type: PowerupType) => void;
 }
 
 // --- Constants ---
@@ -23,11 +25,12 @@ const CAR_WIDTH = 1.6;
 const CAR_LENGTH = 3.8;
 
 // Hitbox Thresholds
-// We want slightly forgiving hitboxes for arcade feel.
-// Contact happens at dx < 1.6 and dz < 3.8.
-// We use slightly smaller numbers to require actual mesh intersection.
-const HITBOX_DX = CAR_WIDTH * 0.9; // ~1.44 collision width threshold
-const HITBOX_DZ = CAR_LENGTH * 0.95; // ~3.61 collision length threshold
+const HITBOX_DX = CAR_WIDTH * 0.9;
+const HITBOX_DZ = CAR_LENGTH * 0.95; 
+
+// Powerup Hitbox
+const POWERUP_DX = 1.5;
+const POWERUP_DZ = 1.5;
 
 // --- Types ---
 interface MovingObject {
@@ -35,31 +38,31 @@ interface MovingObject {
   z: number;
   lane: number;
   speedOffset: number; // For enemies, relative speed
-  type: 'tree' | 'car' | 'sign';
+  type: 'tree' | 'car' | 'sign' | 'powerup';
+  powerupType?: PowerupType;
   color?: string;
   active: boolean;
 }
 
-export default function World({ gameStatus, children, onCrash, onScore }: WorldProps) {
+export default function World({ gameStatus, fuel, children, onCrash, onScore, onCollect }: WorldProps) {
   // --- Refs & State ---
   const roadRef = useRef<Group>(null);
   const objectsRef = useRef<MovingObject[]>([]);
-  const lastSpawnZ = useRef(-50);
-  const frameCount = useRef(0);
-  
-  // To avoid constant state updates, we track score locally and flush periodically
   const scoreAccumulator = useRef(0);
   
+  // Keep a ref of fuel for the animation loop
+  const fuelRef = useRef(fuel);
+  fuelRef.current = fuel;
+
   // Initial Population
   useMemo(() => {
     // Pre-populate some decor
     for (let i = 0; i < 40; i++) {
         const z = -i * 10 + 20;
-        // Trees
         objectsRef.current.push({
             id: Math.random(),
             z: z,
-            lane: Math.random() > 0.5 ? -3 : 3, // Far left or right
+            lane: Math.random() > 0.5 ? -(9 + Math.random() * 6) : (9 + Math.random() * 6),
             speedOffset: 0,
             type: 'tree',
             active: true
@@ -71,26 +74,13 @@ export default function World({ gameStatus, children, onCrash, onScore }: WorldP
   useFrame((state, delta) => {
     if (gameStatus !== GameStatus.PLAYING) return;
 
-    // 1. Calculate World Speed based on base speed + nitro multiplier
+    // 1. Calculate World Speed
     const currentSpeed = BASE_SPEED * playerPositionRef.speedMultiplier;
     const distanceTraveled = currentSpeed * delta;
 
-    // 2. Move Everything Positive Z (towards camera)
-    // We don't move the camera/player forward, we move the world backward.
-    
-    // Move Road Texture/Stripes (Simulated by offsetting a texture or moving a group)
-    // Actually, simpler for low poly: Move the stripes.
-    // Let's implement moving objects logic.
-
-    // Update all objects
+    // 2. Move Everything
     objectsRef.current.forEach(obj => {
         if (!obj.active) return;
-        
-        // Relative speed. Trees move at full world speed. Cars move at (WorldSpeed - CarSpeed).
-        // If speedOffset is positive, the object is moving AWAY from camera (faster than player? no usually slower).
-        // Let's say speedOffset is the speed of the enemy car.
-        // Player speed is `currentSpeed`. Enemy speed is `obj.speedOffset`.
-        // Relative speed towards camera = `currentSpeed - obj.speedOffset`.
         
         let moveSpeed = currentSpeed;
         if (obj.type === 'car') {
@@ -99,20 +89,21 @@ export default function World({ gameStatus, children, onCrash, onScore }: WorldP
 
         obj.z += moveSpeed * delta;
 
-        // Collision Detection for Cars
-        if (obj.type === 'car' && obj.active) {
-            // Box collision approximation
-            // Player is at x: playerPositionRef.x, z: 0.
-            // Enemy is at x: obj.lane * LANE_WIDTH, z: obj.z.
-            
+        // Collision Detection
+        if (obj.active) {
             const dx = Math.abs(playerPositionRef.x - (obj.lane * LANE_WIDTH));
             const dz = Math.abs(0 - obj.z); // Player is at z=0
 
-            // Check if within hitbox bounds
-            if (dx < HITBOX_DX && dz < HITBOX_DZ) {
-                // Crash!
-                onCrash();
-                obj.active = false; // Disable to prevent double hits
+            if (obj.type === 'car') {
+                 if (dx < HITBOX_DX && dz < HITBOX_DZ) {
+                    onCrash();
+                    obj.active = false;
+                }
+            } else if (obj.type === 'powerup' && obj.powerupType) {
+                 if (dx < POWERUP_DX && dz < POWERUP_DZ) {
+                     onCollect(obj.powerupType);
+                     obj.active = false;
+                 }
             }
         }
 
@@ -126,18 +117,9 @@ export default function World({ gameStatus, children, onCrash, onScore }: WorldP
     objectsRef.current = objectsRef.current.filter(o => o.active);
 
     // 3. Spawning Logic
-    // We spawn based on distance logic or simple random chance per frame?
-    // Distance logic is better.
-    // "Virtual" position of the spawn horizon.
-    // Since objects move +Z, we spawn at large -Z.
-    
-    // Move the "spawn cursor" based on speed
-    // This isn't quite right for infinite runner fixed camera. 
-    // We just check if the furthest object is too close, if so, add more?
-    // Or just simple timer.
-    
-    if (Math.random() < 0.05 * (currentSpeed / BASE_SPEED)) { // Spawn rate increases with speed
-        spawnObject(currentSpeed);
+    // Dynamic spawn rate based on speed
+    if (Math.random() < 0.05 * (currentSpeed / BASE_SPEED)) { 
+        spawnObject();
     }
     
     // Always keep trees populated
@@ -155,42 +137,79 @@ export default function World({ gameStatus, children, onCrash, onScore }: WorldP
 
     // 5. Move Road Markers
     if (roadRef.current) {
-        // Simple modulo for infinite scrolling effect on static geometry
-        // The texture offset approach is better, but let's just loop the group z position
         roadRef.current.position.z = (roadRef.current.position.z + distanceTraveled * delta) % SEGMENT_LENGTH;
     }
   });
 
-  const spawnObject = (playerSpeed: number) => {
+  const spawnObject = () => {
       // Don't spawn if too dense
-      const cars = objectsRef.current.filter(o => o.type === 'car' && o.z < -20);
-      if (cars.length > 5) return;
+      const moving = objectsRef.current.filter(o => (o.type === 'car' || o.type === 'powerup') && o.z < -20);
+      if (moving.length > 5) return;
 
       const lane = LANES[Math.floor(Math.random() * LANES.length)];
       // Check if lane is occupied recently
-      const tooClose = cars.some(c => c.lane === lane && Math.abs(c.z - (-VIEW_DISTANCE)) < 30);
+      const tooClose = moving.some(c => c.lane === lane && Math.abs(c.z - (-VIEW_DISTANCE)) < 30);
       if (tooClose) return;
 
-      const enemySpeed = BASE_SPEED * 0.5 + Math.random() * 20; // Slower than player usually
+      // Decide Type: Car or Powerup?
+      // Base chance for Powerup is 20%. 
+      // If fuel is low (< 30), increase powerup chance to 40% to help player survive.
+      let powerupChance = 0.2;
+      const currentFuel = fuelRef.current;
+      
+      if (currentFuel < 30) {
+          powerupChance = 0.45;
+      }
 
-      const colors = ['#ef4444', '#f97316', '#84cc16', '#a855f7', '#ec4899'];
+      if (Math.random() < powerupChance) {
+          // Determine Powerup Type
+          const rand = Math.random();
+          let pType = PowerupType.SCORE;
+          
+          if (currentFuel < 30) {
+               // High priority on FUEL if low
+               if (rand < 0.6) pType = PowerupType.FUEL;
+               else if (rand < 0.8) pType = PowerupType.SHIELD;
+               else pType = PowerupType.NITRO;
+          } else {
+               // Normal distribution
+               if (rand < 0.25) pType = PowerupType.FUEL;
+               else if (rand < 0.5) pType = PowerupType.NITRO;
+               else if (rand < 0.75) pType = PowerupType.SHIELD;
+          }
 
-      objectsRef.current.push({
-          id: Math.random(),
-          z: -VIEW_DISTANCE - Math.random() * 50,
-          lane: lane,
-          speedOffset: enemySpeed,
-          type: 'car',
-          color: colors[Math.floor(Math.random() * colors.length)],
-          active: true
-      });
+          objectsRef.current.push({
+              id: Math.random(),
+              z: -VIEW_DISTANCE,
+              lane: lane,
+              speedOffset: 0, // Powerups are static (relative to world)
+              type: 'powerup',
+              powerupType: pType,
+              active: true
+          });
+
+      } else {
+          // Spawn Enemy Car
+          const enemySpeed = BASE_SPEED * 0.5 + Math.random() * 20; 
+          const colors = ['#ef4444', '#f97316', '#84cc16', '#a855f7', '#ec4899'];
+
+          objectsRef.current.push({
+              id: Math.random(),
+              z: -VIEW_DISTANCE - Math.random() * 50,
+              lane: lane,
+              speedOffset: enemySpeed,
+              type: 'car',
+              color: colors[Math.floor(Math.random() * colors.length)],
+              active: true
+          });
+      }
   };
 
   const spawnDecor = (zPos: number) => {
       objectsRef.current.push({
           id: Math.random(),
           z: zPos,
-          lane: Math.random() > 0.5 ? -3.5 - Math.random() * 2 : 3.5 + Math.random() * 2, // Outside road
+          lane: Math.random() > 0.5 ? -(9 + Math.random() * 6) : (9 + Math.random() * 6), // Outside road
           speedOffset: 0,
           type: 'tree',
           active: true
@@ -223,12 +242,10 @@ export default function World({ gameStatus, children, onCrash, onScore }: WorldP
         <group ref={roadRef}>
             {Array.from({length: 30}).map((_, i) => (
                 <group key={i} position={[0, 0.02, -100 + i * 10]}>
-                    {/* Left Lane Line */}
                     <mesh position={[-LANE_WIDTH/2, 0, 0]} rotation={[-Math.PI/2, 0, 0]}>
                         <planeGeometry args={[0.2, 4]} />
                         <meshBasicMaterial color="#ffffff" opacity={0.5} transparent />
                     </mesh>
-                     {/* Right Lane Line */}
                     <mesh position={[LANE_WIDTH/2, 0, 0]} rotation={[-Math.PI/2, 0, 0]}>
                         <planeGeometry args={[0.2, 4]} />
                          <meshBasicMaterial color="#ffffff" opacity={0.5} transparent />
@@ -244,57 +261,12 @@ export default function World({ gameStatus, children, onCrash, onScore }: WorldP
   );
 }
 
-// Separate component to handle the instanced or individual rendering of objects
-// For max performance, Instances would be best, but for low poly simplicity and diverse colors, individual meshes are fine for < 100 objects.
 const RenderObjects = ({ objectsRef }: { objectsRef: React.MutableRefObject<MovingObject[]> }) => {
-    // Force re-render on every frame to update positions? 
-    // No, standard React won't re-render fast enough for 60fps smooth movement if we rely on state.
-    // We need to use refs for the mesh positions.
-    // However, since we are adding/removing objects, we need React to know about the list structure.
-    // Hybrid approach: The list is stateful (slow updates), the positions are refs (fast updates).
-    // OR: We map over a fixed pool of objects. 
-    
-    // Simplest working solution for "Game Jam" style:
-    // Use a component that uses `useFrame` to update its own children based on the Ref data.
-    
     const groupRef = useRef<Group>(null);
     const [, forceUpdate] = useState(0);
 
     useFrame(() => {
-        // This is a bit of a hack to force React to reconcile the list if it changes size
-        // But doing it every frame is bad.
-        // Better: Just manipulate the THREE.Group children directly.
-        
         if (groupRef.current) {
-            // Re-sync three.js scene graph with data
-            // This is manual scene management.
-            
-            // Actually, let's just make a component for each object type that tracks a specific ID in the ref?
-            // Too complex.
-            
-            // Let's rely on React to render the list, but use a ticker to force update?
-            // No, the ticker works.
-            
-            // Correct R3F way for dynamic high-freq lists:
-            // 1. Data in Ref.
-            // 2. Component renders `instances` or meshes.
-            // 3. `useFrame` updates the meshes imperatively.
-            
-            // For this specific request, let's keep it simple:
-            // Render the meshes based on a state that updates LESS frequently (e.g. only when spawning),
-            // but use useFrame inside the individual Enemy component to interpolate?
-            // No, the World moves them.
-            
-            // Let's use the `forceUpdate` pattern inside useFrame strictly for position updates of known children.
-            
-            const children = groupRef.current.children;
-            const objects = objectsRef.current;
-            
-            // We need to match objects to meshes.
-            // Since we destroy/create, this is tricky without React.
-            // Okay, we will trigger a React render only when count changes?
-            // Let's just update the React state for the list of objects every frame? 
-            // It might be performant enough for < 50 items on modern React 18.
             forceUpdate(n => n + 1);
         }
     });
@@ -303,16 +275,16 @@ const RenderObjects = ({ objectsRef }: { objectsRef: React.MutableRefObject<Movi
         <group ref={groupRef}>
             {objectsRef.current.map((obj) => (
                 <group key={obj.id} position={[obj.lane * (obj.type === 'tree' ? 1 : LANE_WIDTH), 0, obj.z]}>
-                    {obj.type === 'car' ? (
-                        <EnemyCar color={obj.color || 'red'} />
-                    ) : (
-                        <Tree />
-                    )}
+                    {obj.type === 'car' && <EnemyCar color={obj.color || 'red'} />}
+                    {obj.type === 'tree' && <Tree />}
+                    {obj.type === 'powerup' && <PowerupMesh type={obj.powerupType!} />}
                 </group>
             ))}
         </group>
     );
 };
+
+// --- Meshes ---
 
 const EnemyCar = ({ color }: { color: string }) => (
     <group>
@@ -324,7 +296,6 @@ const EnemyCar = ({ color }: { color: string }) => (
             <boxGeometry args={[1.4, 0.6, 1.8]} />
             <meshStandardMaterial color="#333" />
         </mesh>
-         {/* Tail lights */}
          <mesh position={[-0.6, 0.6, 1.91]}>
           <planeGeometry args={[0.3, 0.15]} />
           <meshStandardMaterial color="#550000" />
@@ -348,3 +319,63 @@ const Tree = () => (
         </mesh>
     </group>
 );
+
+const PowerupMesh = ({ type }: { type: PowerupType }) => {
+    const meshRef = useRef<Group>(null);
+    useFrame((state, delta) => {
+        if(meshRef.current) {
+            meshRef.current.rotation.y += delta * 2;
+            meshRef.current.position.y = 1 + Math.sin(state.clock.elapsedTime * 3) * 0.2;
+        }
+    });
+
+    return (
+        <group ref={meshRef}>
+            {type === PowerupType.FUEL && (
+                // Fuel Canister - Made larger and more distinct
+                <group scale={[1.5, 1.5, 1.5]}>
+                    <mesh castShadow position={[0, 0.2, 0]}>
+                        <boxGeometry args={[0.5, 0.7, 0.3]} />
+                        <meshStandardMaterial color="#ef4444" metalness={0.2} roughness={0.5} />
+                    </mesh>
+                    <mesh position={[0, 0.65, 0]}>
+                        <cylinderGeometry args={[0.1, 0.1, 0.2]} />
+                        <meshStandardMaterial color="#222" />
+                    </mesh>
+                     {/* Label */}
+                     <mesh position={[0, 0.2, 0.16]}>
+                        <planeGeometry args={[0.3, 0.3]} />
+                        <meshStandardMaterial color="#fbbf24" />
+                    </mesh>
+                </group>
+            )}
+            {type === PowerupType.NITRO && (
+                // Nitro Bolt
+                <mesh castShadow>
+                    <cylinderGeometry args={[0.2, 0.2, 1.2, 6]} />
+                    <meshStandardMaterial color="#06b6d4" emissive="#06b6d4" emissiveIntensity={0.5} />
+                </mesh>
+            )}
+            {type === PowerupType.SHIELD && (
+                // Shield Sphere
+                <group>
+                     <mesh>
+                        <torusGeometry args={[0.5, 0.1, 16, 32]} />
+                        <meshStandardMaterial color="#3b82f6" emissive="#3b82f6" />
+                    </mesh>
+                    <mesh>
+                        <sphereGeometry args={[0.3]} />
+                        <meshStandardMaterial color="#60a5fa" />
+                    </mesh>
+                </group>
+            )}
+            {type === PowerupType.SCORE && (
+                // Gold Coin/Star
+                <mesh rotation={[Math.PI/2, 0, 0]}>
+                    <cylinderGeometry args={[0.5, 0.5, 0.1, 16]} />
+                    <meshStandardMaterial color="#eab308" metalness={1} roughness={0.1} />
+                </mesh>
+            )}
+        </group>
+    )
+}

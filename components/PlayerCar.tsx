@@ -5,6 +5,7 @@ import { GameStatus, Lane, LANE_WIDTH, NITRO_SPEED_MULTIPLIER } from '../types';
 
 interface PlayerCarProps {
   gameStatus: GameStatus;
+  isInvincible: boolean;
   onNitro: (val: number) => void;
 }
 
@@ -12,7 +13,7 @@ interface PlayerCarProps {
 // This is a performance optimization for the animation loop
 export const playerPositionRef = { x: 0, z: 0, speedMultiplier: 1.0 };
 
-const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, onNitro }) => {
+const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, isInvincible, onNitro }) => {
   const group = useRef<Group>(null);
   const { camera } = useThree();
   
@@ -120,6 +121,14 @@ const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, onNitro }) => {
 
   return (
     <group ref={group} position={[0, 0, 0]}>
+      {/* Shield Effect */}
+      {isInvincible && (
+        <mesh position={[0, 0.8, 1.5]}>
+           <sphereGeometry args={[1.8, 32, 32]} />
+           <meshStandardMaterial color="#60a5fa" transparent opacity={0.3} emissive="#3b82f6" emissiveIntensity={0.5} />
+        </mesh>
+      )}
+
       {/* Car Body - Low Poly Style */}
       <group>
         {/* Chassis */}
