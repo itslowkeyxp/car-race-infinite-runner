@@ -80,12 +80,14 @@ const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, isInvincible, onNitro
     if (!group.current) return;
 
     const active = gameStatus === GameStatus.PLAYING;
+    // Effectively boosting if key pressed AND fuel exists
+    const isBoosting = active && isNitroActive && nitroFuel > 0;
 
     // Nitro Logic
     let currentNitro = nitroFuel;
     let speedMult = 1.0;
 
-    if (active && isNitroActive && nitroFuel > 0) {
+    if (isBoosting) {
       currentNitro = Math.max(0, nitroFuel - delta * 20); // Burn rate
       speedMult = NITRO_SPEED_MULTIPLIER;
       setNitroFuel(currentNitro);
@@ -121,8 +123,8 @@ const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, isInvincible, onNitro
     // Camera Follow Logic (Subtle)
     // Camera is naturally at [0, 4, 10]
     if (active) {
-        // Dynamic FOV for speed sensation
-        const targetFov = isNitroActive ? 75 : 60;
+        // Dynamic FOV for speed sensation (only if actually boosting)
+        const targetFov = isBoosting ? 75 : 60;
         camera.fov = MathUtils.lerp(camera.fov, targetFov, delta * 2);
         camera.updateProjectionMatrix();
 
@@ -130,8 +132,8 @@ const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, isInvincible, onNitro
         const camX = xPos.current * 0.3;
         camera.position.x = MathUtils.lerp(camera.position.x, camX, delta * 2);
         
-        // Camera shake on high speed
-        if (isNitroActive) {
+        // Camera shake on high speed (only if actually boosting)
+        if (isBoosting) {
             camera.position.y = 4 + (Math.random() - 0.5) * 0.1;
         } else {
             camera.position.y = MathUtils.lerp(camera.position.y, 4, delta * 5);
@@ -193,16 +195,16 @@ const PlayerCar: React.FC<PlayerCarProps> = ({ gameStatus, isInvincible, onNitro
         <Wheel x={-0.85} z={-1.2} />
         <Wheel x={0.85} z={-1.2} />
 
-        {/* Nitro Flame */}
-        {isNitroActive && (
+        {/* Nitro Flame - Only visible if boosting key is held AND fuel > 0 */}
+        {isNitroActive && nitroFuel > 0 && (
             <>
-            <mesh position={[-0.4, 0.3, 2.2]}>
-                <coneGeometry args={[0.2, 0.8, 8]} />
-                <meshBasicMaterial color="#06b6d4" transparent opacity={0.8} />
+            <mesh position={[-0.4, 0.4, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
+                <coneGeometry args={[0.15, 1.2, 16]} />
+                <meshStandardMaterial color="#00ffff" emissive="#00ffff" emissiveIntensity={3} transparent opacity={0.9} />
             </mesh>
-             <mesh position={[0.4, 0.3, 2.2]}>
-                <coneGeometry args={[0.2, 0.8, 8]} />
-                <meshBasicMaterial color="#06b6d4" transparent opacity={0.8} />
+             <mesh position={[0.4, 0.4, 2.2]} rotation={[Math.PI / 2, 0, 0]}>
+                <coneGeometry args={[0.15, 1.2, 16]} />
+                <meshStandardMaterial color="#00ffff" emissive="#00ffff" emissiveIntensity={3} transparent opacity={0.9} />
             </mesh>
             </>
         )}
