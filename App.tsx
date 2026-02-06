@@ -22,6 +22,7 @@ export default function App() {
   
   // Visual Effects State
   const [isShaking, setIsShaking] = useState(false);
+  const [showLevelUp, setShowLevelUp] = useState(false);
   
   // Timers refs to clear them if needed
   const shieldTimer = useRef<number | null>(null);
@@ -40,13 +41,28 @@ export default function App() {
     }
   }, [score, highScore]);
 
+  // Level Up Listener
+  useEffect(() => {
+    if (stage > 1 && status === GameStatus.PLAYING) {
+        setShowLevelUp(true);
+        // Bonus fuel on level up
+        setFuel(f => Math.min(MAX_FUEL, f + 25));
+        const timer = window.setTimeout(() => setShowLevelUp(false), 3000);
+        return () => window.clearTimeout(timer);
+    } else {
+        setShowLevelUp(false);
+    }
+  }, [stage, status]);
+
   // Fuel Drain Logic
   useEffect(() => {
     let interval: number;
     if (status === GameStatus.PLAYING) {
       interval = window.setInterval(() => {
         setFuel(prev => {
-          const next = prev - (FUEL_DRAIN_RATE * 0.1); // Run every 100ms
+          // Fuel drain increases slightly with stage
+          const stageFactor = 1 + (stage * 0.1); 
+          const next = prev - (FUEL_DRAIN_RATE * stageFactor * 0.1); // Run every 100ms
           if (next <= 0) {
              setStatus(GameStatus.GAME_OVER);
              return 0;
@@ -56,7 +72,7 @@ export default function App() {
       }, 100);
     }
     return () => clearInterval(interval);
-  }, [status]);
+  }, [status, stage]);
 
   const startGame = () => {
     setStatus(GameStatus.PLAYING);
@@ -70,6 +86,7 @@ export default function App() {
     setIsInvincible(false);
     setScoreMultiplier(1);
     setIsShaking(false);
+    setShowLevelUp(false);
   };
 
   const handleCrash = useCallback(() => {
@@ -95,10 +112,17 @@ export default function App() {
   }, [isInvincible]);
 
   const handleScoreUpdate = useCallback((deltaScore: number, currentSpeed: number) => {
-    setScore(s => Math.floor(s + (deltaScore * scoreMultiplier))); // Apply multiplier
+    setScore(s => {
+        const newScore = Math.floor(s + (deltaScore * scoreMultiplier));
+        // Calculate stage based on score thresholds (e.g., every 3000 points)
+        setStage(currentStage => {
+            const calculatedStage = 1 + Math.floor(newScore / 3000);
+            return calculatedStage > currentStage ? calculatedStage : currentStage;
+        });
+        return newScore;
+    }); 
     setSpeed(Math.floor(currentSpeed * 2)); 
-    setStage(s => 1 + Math.floor(score / 5000));
-  }, [score, scoreMultiplier]);
+  }, [scoreMultiplier]);
 
   const handleNitroUpdate = useCallback((amount: number) => {
     setNitro(amount);
@@ -136,6 +160,7 @@ export default function App() {
           gameStatus={status}
           isInvincible={isInvincible}
           fuel={fuel}
+          stage={stage}
           onCrash={handleCrash}
           onScore={handleScoreUpdate}
           onNitro={handleNitroUpdate}
@@ -146,6 +171,18 @@ export default function App() {
       {/* Red Flash Overlay */}
       {isShaking && (
         <div className="absolute inset-0 z-[100] bg-red-600/30 mix-blend-overlay pointer-events-none animate-pulse" />
+      )}
+
+      {/* Level Up Overlay */}
+      {showLevelUp && (
+         <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div className="text-center animate-bounce">
+                <h2 className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-red-500 drop-shadow-[0_5px_5px_rgba(0,0,0,0.8)] italic transform -skew-x-12">
+                    STAGE {stage}
+                </h2>
+                <p className="text-white text-xl font-bold mt-2 drop-shadow-md">SPEED UP! TRAFFIC INCREASING!</p>
+            </div>
+         </div>
       )}
 
       {/* UI Overlay Layer */}
@@ -164,6 +201,12 @@ export default function App() {
           <div className="bg-slate-900/80 border-l-4 border-blue-400 px-4 py-2 rounded-r min-w-[120px]">
             <div className="text-xs text-slate-400">Speed</div>
             <div className="text-2xl font-bold">{speed} <span className="text-sm font-normal">km/h</span></div>
+          </div>
+          
+           {/* Stage Indicator */}
+           <div className="bg-slate-900/80 border-l-4 border-purple-500 px-4 py-2 rounded-r min-w-[100px]">
+            <div className="text-xs text-slate-400">Stage</div>
+            <div className="text-2xl font-bold">{stage}</div>
           </div>
 
           <div className="flex-grow"></div>
@@ -222,6 +265,7 @@ export default function App() {
                 {fuel <= 0 ? "OUT OF FUEL!" : "CRASHED!"}
              </h2>
              <p className="text-xl text-white mb-2">Final Score: {score.toLocaleString()}</p>
+             <p className="text-lg text-slate-300 mb-4">Reached Stage {stage}</p>
              {score >= highScore && score > 0 && (
                <p className="text-yellow-400 text-sm font-bold mb-6">NEW HIGH SCORE!</p>
              )}

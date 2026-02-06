@@ -8,6 +8,8 @@ import { playerPositionRef } from './PlayerCar';
 interface WorldProps {
   gameStatus: GameStatus;
   fuel: number;
+  stage: number;
+  groundColor: string;
   children?: React.ReactNode;
   onCrash: () => void;
   onScore: (d: number, s: number) => void;
@@ -44,15 +46,17 @@ interface MovingObject {
   active: boolean;
 }
 
-export default function World({ gameStatus, fuel, children, onCrash, onScore, onCollect }: WorldProps) {
+export default function World({ gameStatus, fuel, stage, groundColor, children, onCrash, onScore, onCollect }: WorldProps) {
   // --- Refs & State ---
   const roadRef = useRef<Group>(null);
   const objectsRef = useRef<MovingObject[]>([]);
   const scoreAccumulator = useRef(0);
   
-  // Keep a ref of fuel for the animation loop
+  // Keep a ref of fuel/stage for the animation loop
   const fuelRef = useRef(fuel);
   fuelRef.current = fuel;
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
 
   // Initial Population
   useMemo(() => {
@@ -75,7 +79,9 @@ export default function World({ gameStatus, fuel, children, onCrash, onScore, on
     if (gameStatus !== GameStatus.PLAYING) return;
 
     // 1. Calculate World Speed
-    const currentSpeed = BASE_SPEED * playerPositionRef.speedMultiplier;
+    // Speed slightly increases with stage (5% per stage cap at 50%)
+    const stageSpeedMultiplier = 1 + Math.min(0.5, (stageRef.current - 1) * 0.05);
+    const currentSpeed = BASE_SPEED * playerPositionRef.speedMultiplier * stageSpeedMultiplier;
     const distanceTraveled = currentSpeed * delta;
 
     // 2. Move Everything
@@ -117,8 +123,11 @@ export default function World({ gameStatus, fuel, children, onCrash, onScore, on
     objectsRef.current = objectsRef.current.filter(o => o.active);
 
     // 3. Spawning Logic
-    // Dynamic spawn rate based on speed
-    if (Math.random() < 0.05 * (currentSpeed / BASE_SPEED)) { 
+    // Dynamic spawn rate based on speed and STAGE
+    // Base probability 0.05. Increases with speed and stage.
+    const spawnProb = 0.05 * (currentSpeed / BASE_SPEED) * (1 + (stageRef.current - 1) * 0.1);
+    
+    if (Math.random() < spawnProb) { 
         spawnObject();
     }
     
@@ -142,18 +151,19 @@ export default function World({ gameStatus, fuel, children, onCrash, onScore, on
   });
 
   const spawnObject = () => {
-      // Don't spawn if too dense
+      // Limit density based on stage (allow more objects at higher stages)
+      const maxObjects = 5 + Math.floor(stageRef.current / 2);
       const moving = objectsRef.current.filter(o => (o.type === 'car' || o.type === 'powerup') && o.z < -20);
-      if (moving.length > 5) return;
+      if (moving.length > maxObjects) return;
 
       const lane = LANES[Math.floor(Math.random() * LANES.length)];
       // Check if lane is occupied recently
-      const tooClose = moving.some(c => c.lane === lane && Math.abs(c.z - (-VIEW_DISTANCE)) < 30);
+      // Minimum gap decreases as stage increases (harder!)
+      const minGap = Math.max(15, 30 - stageRef.current * 2);
+      const tooClose = moving.some(c => c.lane === lane && Math.abs(c.z - (-VIEW_DISTANCE)) < minGap);
       if (tooClose) return;
 
       // Decide Type: Car or Powerup?
-      // Base chance for Powerup is 20%. 
-      // If fuel is low (< 30), increase powerup chance to 40% to help player survive.
       let powerupChance = 0.2;
       const currentFuel = fuelRef.current;
       
@@ -167,12 +177,10 @@ export default function World({ gameStatus, fuel, children, onCrash, onScore, on
           let pType = PowerupType.SCORE;
           
           if (currentFuel < 30) {
-               // High priority on FUEL if low
                if (rand < 0.6) pType = PowerupType.FUEL;
                else if (rand < 0.8) pType = PowerupType.SHIELD;
                else pType = PowerupType.NITRO;
           } else {
-               // Normal distribution
                if (rand < 0.25) pType = PowerupType.FUEL;
                else if (rand < 0.5) pType = PowerupType.NITRO;
                else if (rand < 0.75) pType = PowerupType.SHIELD;
@@ -182,7 +190,7 @@ export default function World({ gameStatus, fuel, children, onCrash, onScore, on
               id: Math.random(),
               z: -VIEW_DISTANCE,
               lane: lane,
-              speedOffset: 0, // Powerups are static (relative to world)
+              speedOffset: 0,
               type: 'powerup',
               powerupType: pType,
               active: true
@@ -190,7 +198,11 @@ export default function World({ gameStatus, fuel, children, onCrash, onScore, on
 
       } else {
           // Spawn Enemy Car
-          const enemySpeed = BASE_SPEED * 0.5 + Math.random() * 20; 
+          // Enemy relative speed variance increases with stage
+          const baseEnemySpeed = BASE_SPEED * 0.5;
+          const variance = 20 + (stageRef.current * 5);
+          const enemySpeed = baseEnemySpeed + Math.random() * variance; 
+          
           const colors = ['#ef4444', '#f97316', '#84cc16', '#a855f7', '#ec4899'];
 
           objectsRef.current.push({
@@ -228,14 +240,14 @@ export default function World({ gameStatus, fuel, children, onCrash, onScore, on
           <meshStandardMaterial color="#334155" roughness={0.8} />
         </mesh>
         
-        {/* Shoulders */}
+        {/* Shoulders - dynamic color */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-LANE_WIDTH * 1.5 - 1.5, 0.01, 0]}>
           <planeGeometry args={[3, 300]} />
-          <meshStandardMaterial color="#4ade80" />
+          <meshStandardMaterial color={groundColor === '#2e1065' ? '#a21caf' : '#4ade80'} />
         </mesh>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[LANE_WIDTH * 1.5 + 1.5, 0.01, 0]}>
           <planeGeometry args={[3, 300]} />
-          <meshStandardMaterial color="#4ade80" />
+          <meshStandardMaterial color={groundColor === '#2e1065' ? '#a21caf' : '#4ade80'} />
         </mesh>
 
         {/* Moving Markers Group */}
