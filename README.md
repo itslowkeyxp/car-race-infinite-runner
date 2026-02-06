@@ -1,20 +1,45 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Retro Highway Racer
 
-# Run and deploy your AI Studio app
+A high-speed, infinite 3D arcade racing game built with React, Three.js, and React Three Fiber. Dodge traffic, manage your fuel, and hit the nitro to survive as long as possible in this low-poly synth-wave inspired runner.
 
-This contains everything you need to run your app locally.
+**[Play the Game Live](https://carrace-six.vercel.app/)**
 
-View your app in AI Studio: https://ai.studio/apps/drive/12Qq3FR3qEoazFHiTlHzqNP4IupKUI8mm
+## 🎮 Controls
 
-## Run Locally
+*   **Steering:** `Arrow Left` / `Arrow Right` OR `A` / `D`
+*   **Nitro Boost:** Hold `Spacebar` (Consumes Nitro Fuel)
 
-**Prerequisites:**  Node.js
+## 🌟 Features
 
+*   **Infinite Procedural World:** Endless roads with dynamic traffic generation.
+*   **Dynamic Day/Night Cycle:** Experience Day, Sunset, Night, and Neon modes as you progress through stages.
+*   **Power-up System:**
+    *   🔴 **Fuel:** Refills your gas tank (Critical for survival).
+    *   🔵 **Shield:** Grants temporary invincibility.
+    *   ⚡ **Nitro:** Refills your boost gauge.
+    *   🟡 **Score Multiplier:** Doubles score gain for a short time.
+*   **Physics Interaction:** Hit cones to send them flying, crash into barriers, and dodge aggressive traffic.
+*   **Progressive Difficulty:** Speed and traffic density increase as you level up stages.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 🛠️ Tech Stack
+
+*   **React 18**
+*   **React Three Fiber (R3F)** - 3D Rendering
+*   **Three.js** - 3D Engine
+*   **Tailwind CSS** - UI Styling
+
+## 🚀 Development
+
+1.  Clone the repository.
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
+3.  Run the development server:
+    ```bash
+    npm run dev
+    ```
+
+## 📄 License
+
+MIT
