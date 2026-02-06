@@ -20,6 +20,9 @@ export default function App() {
   const [isInvincible, setIsInvincible] = useState(false);
   const [scoreMultiplier, setScoreMultiplier] = useState(1);
   
+  // Visual Effects State
+  const [isShaking, setIsShaking] = useState(false);
+  
   // Timers refs to clear them if needed
   const shieldTimer = useRef<number | null>(null);
   const multiplierTimer = useRef<number | null>(null);
@@ -66,10 +69,16 @@ export default function App() {
     setCombo(1.0);
     setIsInvincible(false);
     setScoreMultiplier(1);
+    setIsShaking(false);
   };
 
   const handleCrash = useCallback(() => {
     if (isInvincible) return; // Ignore crash if shielded
+
+    // Trigger visual effects
+    setIsShaking(true);
+    // Reset shake after animation duration
+    window.setTimeout(() => setIsShaking(false), 500);
 
     setLives(prev => {
       const newLives = prev - 1;
@@ -119,7 +128,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="relative w-full h-screen bg-slate-900 overflow-hidden">
+    <div className={`relative w-full h-screen bg-slate-900 overflow-hidden ${isShaking ? 'animate-shake' : ''}`}>
       
       {/* 3D Game Layer */}
       <div className="absolute inset-0 z-0">
@@ -133,6 +142,11 @@ export default function App() {
           onCollect={handleCollect}
         />
       </div>
+
+      {/* Red Flash Overlay */}
+      {isShaking && (
+        <div className="absolute inset-0 z-[100] bg-red-600/30 mix-blend-overlay pointer-events-none animate-pulse" />
+      )}
 
       {/* UI Overlay Layer */}
       <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between">
