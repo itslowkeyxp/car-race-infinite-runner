@@ -4,6 +4,9 @@ A high-speed, infinite 3D arcade racing game built with React, Three.js, and Rea
 
 **[Play the Game Live](https://carrace-six.vercel.app/)**
 
+<img width="1907" height="896" alt="image" src="https://github.com/user-attachments/assets/32f7fe57-43b6-428f-b472-e3bbd0462b72" />
+
+
 ## 🎮 Controls
 
 *   **Steering:** `Arrow Left` / `Arrow Right` OR `A` / `D`
